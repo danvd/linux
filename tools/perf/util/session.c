@@ -2481,6 +2481,11 @@ out_err:
 	auxtrace__free_events(session);
 	reader__release_decomp(&rd);
 	session->one_mmap = false;
+	for(int i = 0; i < NUM_MMAPS; ++i) {
+		if (rd.mmaps[i] && rd.mmap_size > 0) {
+			munmap(rd.mmaps[i], rd.mmap_size);
+		}
+	}
 	return err;
 }
 
