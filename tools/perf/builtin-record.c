@@ -184,6 +184,7 @@ struct record {
 };
 
 static volatile int done;
+static volatile int restart;
 
 static volatile int auxtrace_record__snapshot_started;
 static DEFINE_TRIGGER(auxtrace_snapshot_trigger);
@@ -2634,6 +2635,12 @@ static int __cmd_record(struct record *rec, int argc, const char **argv)
 		}
 
 		if (trigger_is_hit(&switch_output_trigger)) {
+			if (rec->opts.comp_level >= 0) {
+				trigger_off(&switch_output_trigger);
+				done = 1;
+				restart = 1;
+				continue;
+			}
 			/*
 			 * If switch_output_trigger is hit, the data in
 			 * overwritable ring buffer should have been collected,
@@ -3287,7 +3294,7 @@ static int parse_record_synth_option(const struct option *opt,
  *
  * Just say no to tons of global variables, sigh.
  */
-static struct record record = {
+static struct record record_tmpl = {
 	.opts = {
 		.sample_time	     = true,
 		.mmap_pages	     = UINT_MAX,
@@ -3317,6 +3324,8 @@ static struct record record = {
 		.ordered_events	= true,
 	},
 };
+
+static struct record record = {0};
 
 const char record_callchain_help[] = CALLCHAIN_RECORD_HELP
 	"\n\t\t\t\tDefault: fp";
@@ -3948,7 +3957,12 @@ int cmd_record(int argc, const char **argv)
 	int err;
 	struct record *rec = &record;
 	char errbuf[BUFSIZ];
-
+	int orig_argc = argc;
+_restart:
+	restart = 0;
+	done = 0;
+	record = record_tmpl;
+	argc = orig_argc;
 	setlocale(LC_ALL, "");
 
 #ifndef HAVE_BPF_SKEL
@@ -4024,11 +4038,6 @@ int cmd_record(int argc, const char **argv)
 			pr_err("Asynchronous streaming mode (--aio) is mutually exclusive to parallel streaming mode.\n");
 			goto out_opts;
 		}
-	}
-
-	if (rec->opts.comp_level != 0) {
-		pr_debug("Compression enabled, disabling build id collection at the end of the session.\n");
-		rec->no_buildid = true;
 	}
 
 	if (rec->opts.record_switch_events &&
@@ -4221,6 +4230,9 @@ out_opts:
 	record__free_thread_masks(rec, rec->nr_threads);
 	rec->nr_threads = 0;
 	evlist__close_control(rec->opts.ctl_fd, rec->opts.ctl_fd_ack, &rec->opts.ctl_fd_close);
+	if (err == 0 && restart) {
+		goto _restart;
+	}
 	return err;
 }
 
