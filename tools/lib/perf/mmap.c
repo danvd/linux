@@ -152,7 +152,7 @@ static int __perf_mmap__read_init(struct perf_mmap *md)
 		return -EAGAIN;
 
 	size = md->end - md->start;
-	if (size > (unsigned long)(md->mask) + 1) {
+	if (size > (unsigned long)(md->mask) + 1 || md->overwrite) {
 		if (!md->overwrite) {
 			WARN_ONCE(1, "failed to keep up with mmap data. (warn only once)\n");
 

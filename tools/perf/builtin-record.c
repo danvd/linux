@@ -1741,7 +1741,15 @@ record__finish_output(struct record *rec)
 	}
 
 	if (!rec->no_buildid) {
-		process_buildids(rec);
+		/*
+		* Write header prior processing buildids. In case when processing fails
+		* there will be least data file with correct header.
+		*/
+		perf_session__write_header(rec->session, rec->evlist, fd, true);
+		if (process_buildids(rec) != 0)
+			return;
+
+		perf_header__set_feat(&rec->session->header, HEADER_BUILD_ID);
 
 		if (rec->buildid_all)
 			dsos__hit_all(rec->session);
@@ -2613,8 +2621,14 @@ static int __cmd_record(struct record *rec, int argc, const char **argv)
 		 * evlist__toggle_bkw_mmap ensure we never
 		 * convert BKW_MMAP_EMPTY to BKW_MMAP_DATA_PENDING.
 		 */
-		if (trigger_is_hit(&switch_output_trigger) || done || draining)
+		if (trigger_is_hit(&switch_output_trigger) || done || draining) {
 			evlist__toggle_bkw_mmap(rec->evlist, BKW_MMAP_DATA_PENDING);
+			if (trigger_is_hit(&switch_output_trigger) && record__comp_enabled(rec)) {
+				trigger_off(&switch_output_trigger);
+				done = 1;
+				restart = 1;
+			}
+		}
 
 		if (record__mmap_read_all(rec, false) < 0) {
 			trigger_error(&auxtrace_snapshot_trigger);
@@ -2635,12 +2649,6 @@ static int __cmd_record(struct record *rec, int argc, const char **argv)
 		}
 
 		if (trigger_is_hit(&switch_output_trigger)) {
-			if (rec->opts.comp_level >= 0) {
-				trigger_off(&switch_output_trigger);
-				done = 1;
-				restart = 1;
-				continue;
-			}
 			/*
 			 * If switch_output_trigger is hit, the data in
 			 * overwritable ring buffer should have been collected,
